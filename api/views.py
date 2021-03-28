@@ -6,9 +6,8 @@ from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseServer
 # Models
 from api.models import Scraper
 
-# Utils 
+# Utils
 from datetime import datetime, timedelta
-from sqlite3 import IntegrityError
 import requests
 import json
 
@@ -21,7 +20,7 @@ from bs4 import BeautifulSoup
 
 class ScraperAPI(View):
     def get(self, *args, **kwargs):
-        """ Function to GET the Scrapers saved in the DB
+        """GET the Scrapers saved in the DB
 
         Input: N/A
 
@@ -29,16 +28,18 @@ class ScraperAPI(View):
         {
             "scrapers": [
                 {
-                    "created_at": "2021-03-27T02:41:55.456Z",
-                    "currency": "Dogecoint",
-                    "frequency": 60,
-                    "id": 6,
-                    "value": "$ 5",
-                    "value_updated_at": "2021-03-27T02:53:05.817Z"
+                    "id": (int) scraper ID,
+                    "created_at": (isoformat str),
+                    "currency": (str) currency name,
+                    "frequency": (int) job frequency in seconds,
+                    "value": (float) currency price,
+                    "value_updated_at": (isoformat str)
                 }
             ]
         }
 
+        Output error:
+        { "error": (str) message }
         """
 
         try:
@@ -51,192 +52,124 @@ class ScraperAPI(View):
 
                 now = datetime.now()
                 updated_at = scraper.value_updated_at.replace(tzinfo=None)
-                frequency = timedelta(minutes=scraper.frequency)
+                frequency = timedelta(seconds=scraper.frequency)
 
                 interval = updated_at + frequency
 
                 if interval < now:
                     search_currency = scraper.currency.strip().replace(' ', '-')
                     response = requests.get(
-                'https://coinmarketcap.com/currencies/{}/'.format(search_currency)).text
+                        'https://coinmarketcap.com/currencies/{}/'.format(search_currency)).text
                     soup = BeautifulSoup(response, features="html.parser")
 
-                    price = soup.select_one('div[class*="priceValue"]').get_text()
-                    scraper.value = price
+                    price = soup.select_one(
+                        'div[class*="priceValue"]').get_text()
+                    scraper.value = float(price.lstrip('$').replace(',', '_'))
 
                     scraper.save()
-                
-                data.append(scraper.toDict())
 
+                data.append(scraper.toDict())
 
         except AttributeError:
             return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. [{}] not found".format(data['currency']),
-                    "example": "Please visit https://coinmarketcap.com/coins/",
-                }
-            }, indent=1),
+                "error": "[{}] not found".format(scraper.currency)}),
                 content_type='application/json')
         except requests.ConnectionError:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please retry",
-                    "example": {
-                        "currency": "Cardano",
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseServerError(
+                json.dumps({"error": "Connection error, please retry"}),
                 content_type='application/json')
         except:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please retry",
-                    "example": None,
-                }
-            }, indent=1),
+            return HttpResponseServerError(
+                json.dumps({"error": "Please retry"}),
                 content_type='application/json')
 
         return HttpResponse(
             json.dumps(
-                {
-                    "scrapers": data
-                },
-                sort_keys=True,
-                indent=1,
+                {"scrapers": data},
+                sort_keys=True, indent=1,
                 cls=DjangoJSONEncoder
             ),
             content_type='application/json'
         )
 
     def post(self, *args, **kwargs):
-        """
-        Function to POST a new the Scrapers in the DB
+        """POST a new the Scrapers in the DB
 
         Input:
-        {
-            "currency": "Dogecoint",
-            "frequency": 30
+        { 
+            "currency": (str) currency name,
+            "frequency": (int) job frequency in seconds 
         }
 
         Output: 
         {
-            "scraper": 
-                {
-                    "created_at": "2021-03-27T02:41:55.456Z",
-                    "currency": "Dogecoint",
-                    "frequency": 30,
-                    "id": 6,
-                    "value": "5",
-                    "value_updated_at": "2021-03-27T02:53:05.817Z"
-                }
+            "id": (int) scraper ID,
+            "created_at": (isoformat str),
+            "currency": (str) currency name,
+            "frequency": (int) job frequency in seconds
         }
 
+        Output error:
+        { "error": (str) message }
         """
 
         try:
             data = json.loads(self.request.body.decode('utf-8'))
+
             search_currency = data['currency'].strip().replace(' ', '-')
-
             response = requests.get(
-                'https://coinmarketcap.com/currencies/{}/'.format(search_currency)).text
-            soup = BeautifulSoup(response, features="html.parser")
+                'https://coinmarketcap.com/currencies/{}/'.format(search_currency))
 
-            price = soup.select_one('div[class*="priceValue"]').get_text()
+            if response.status_code == 404:
+                raise ValueError()
 
             scraper = Scraper(
                 currency=data['currency'],
-                value=price,
                 frequency=data['frequency']
             )
-
             scraper.save()
 
         except json.JSONDecodeError:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please send the correct payload.",
-                    "example": {
-                        "currency": "Cardano",
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps({"error":  "Please send the correct payload"}),
                 content_type='application/json')
         except requests.ConnectionError:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please retry",
-                    "example": {
-                        "currency": "Cardano",
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseServerError(
+                json.dumps({"error": "Connection error, please retry"}),
                 content_type='application/json')
-        except AttributeError:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. [{}] not found".format(data['currency']),
-                    "example": "Please visit https://coinmarketcap.com/coins/",
-                }
-            }, indent=1),
-                content_type='application/json')
-        except IntegrityError:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. [{}] already exists".format(data['currency']),
-                    "example": None,
-                }
-            }, indent=1),
+        except ValueError:
+            return HttpResponseBadRequest(
+                json.dumps(
+                    {"error": '{0} not found in https://coinmarketcap.com/currencies/{0}/'.format(search_currency)}),
                 content_type='application/json')
         except:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please retry",
-                    "example": {
-                        "currency": "Cardano",
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps(
+                    {"error": "[{}] already exists".format(data['currency'])}),
                 content_type='application/json')
 
-        return HttpResponse(json.dumps(
-            {
-                "scraper": scraper.toDict()
-            },
-            sort_keys=True,
-            indent=1,
-            cls=DjangoJSONEncoder
-        ), content_type='application/json')
+        return HttpResponse(
+            json.dumps({
+                "id": scraper.id,
+                "created_at": scraper.created_at,
+                "currency": scraper.currency,
+                "frequency": scraper.frequency
+            }, cls=DjangoJSONEncoder),
+            content_type='application/json')
 
     def put(self, *args, **kwargs):
-        """ Function to PUT a new frequency in the selected 
-        Scrapers from the DB
+        """PUT a new frequency in the selected Scraper from the DB
 
         Input:
-        {
-            "id": 1,
-            "frequency": 30
-        }
+        { "id": 1, "frequency": 30 }
 
         Output: 
-        {
-            "scraper": 
-                {
-                    "created_at": "2021-03-27T02:41:55.456Z",
-                    "currency": "Dogecoint",
-                    "frequency": 30,
-                    "id": 6,
-                    "value": "5",
-                    "value_updated_at": "2021-03-27T02:53:05.817Z"
-                }
-        }
+        { "msg": (str) message }
 
+        Output error:
+        { "error": (str) message }
         """
 
-        # validate payload
         try:
 
             data = json.loads(self.request.body.decode('utf-8'))
@@ -245,71 +178,35 @@ class ScraperAPI(View):
             scraper.save()
 
         except Scraper.DoesNotExist:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. id [{}] does not exists".format(data['id']),
-                    "example": {
-                        "id": 1,
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps(
+                    {"error": "id [{}] does not exists".format(data['id'])}),
                 content_type='application/json')
         except json.JSONDecodeError:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please send the correct payload.",
-                    "example": {
-                        "id": 1,
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps({"error": "Please send the correct payload"}),
                 content_type='application/json')
         except:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please send the correct payload.",
-                    "example": {
-                        "id": 1,
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseServerError(
+                json.dumps({"error":  "Please retry"}),
                 content_type='application/json')
 
         return HttpResponse(
-            json.dumps(
-                {
-                    "scraper": scraper.toDict()
-                },
-                sort_keys=True,
-                indent=1,
-                cls=DjangoJSONEncoder
-            ),
-            content_type='application/json')
+            json.dumps({"msg": "Scraper updated"}),
+            content_type='application/json'
+        )
 
     def delete(self, *args, **kwargs):
-        """ Function to DELETE the selected Scrapers from the DB
+        """DELETE the selected Scrapers from the DB
 
         Input:
-        {
-            "id": 1,
-        }
+        { "id": 1 }
 
         Output: 
-        {
-            "scraper": 
-                {
-                    "created_at": "2021-03-27T02:41:55.456Z",
-                    "currency": "Dogecoint",
-                    "frequency": 30,
-                    "id": 6,
-                    "value": "5",
-                    "value_updated_at": "2021-03-27T02:53:05.817Z"
-                }
-        }
+        { "msg": (str) message }
 
+        Output error:
+        { "error": (str) message }
         """
 
         try:
@@ -320,40 +217,20 @@ class ScraperAPI(View):
             scraper.delete()
 
         except Scraper.DoesNotExist:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. id [{}] does not exists".format(data['id']),
-                    "example": {'id': 1},
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps(
+                    {"error": "id [{}] does not exists".format(data['id'])}),
                 content_type='application/json')
         except json.JSONDecodeError:
-            return HttpResponseBadRequest(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please send the correct payload.",
-                    "example": {'id': 1},
-                }
-            }, indent=1),
+            return HttpResponseBadRequest(
+                json.dumps({"error": "Please send the correct payload"}),
                 content_type='application/json')
         except:
-            return HttpResponseServerError(json.dumps({
-                "error": {
-                    "message": "An error has occurred. Please retry",
-                    "example": {
-                        "currency": "Cardano",
-                        "frequency": 30
-                    },
-                }
-            }, indent=1),
+            return HttpResponseServerError(
+                json.dumps({"error":  "Please retry"}),
                 content_type='application/json')
 
         return HttpResponse(
-            json.dumps(
-                {
-                    "scraper": scraper.toDict()
-                },
-                sort_keys=True,
-                indent=1,
-                cls=DjangoJSONEncoder
-            ),
-            content_type='application/json')
+            json.dumps({"msg": "Scraper deleted"}),
+            content_type='application/json'
+        )
