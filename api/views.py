@@ -116,7 +116,7 @@ class ScraperAPI(View):
         try:
             data = json.loads(self.request.body.decode('utf-8'))
 
-            search_currency = data['currency'].strip().replace(' ', '-')
+            search_currency = data['currency'].strip().replace(' ', '-').lower()
             response = requests.get(
                 'https://coinmarketcap.com/currencies/{}/'.format(search_currency))
 
@@ -124,7 +124,7 @@ class ScraperAPI(View):
                 raise ValueError()
 
             scraper = Scraper(
-                currency=data['currency'],
+                currency=data['currency'].lower(),
                 frequency=data['frequency']
             )
             scraper.save()
