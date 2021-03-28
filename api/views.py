@@ -11,11 +11,11 @@ from datetime import datetime, timedelta
 import requests
 import json
 
-# version para entregar
+# Solution with RegExp
 import re
 
-# solucion facil
-from bs4 import BeautifulSoup
+# Solution with BeautifulSoup
+# from bs4 import BeautifulSoup
 
 
 class ScraperAPI(View):
@@ -60,19 +60,25 @@ class ScraperAPI(View):
                     search_currency = scraper.currency.strip().replace(' ', '-')
                     response = requests.get(
                         'https://coinmarketcap.com/currencies/{}/'.format(search_currency)).text
-                    soup = BeautifulSoup(response, features="html.parser")
 
-                    price = soup.select_one(
-                        'div[class*="priceValue"]').get_text()
+                    # Solution with RegExp
+                    regexp = '<div class="priceValue___.{1,10}">\$.{1,100}<\/div>'
+                    result = re.search(regexp, response)[0]
+                    price = result[result.find('$'):result.find('</div>')]
+
+                    # Solution with BeautifulSoup
+                    # soup = BeautifulSoup(response, features="html.parser")
+                    # price = soup.select_one('div[class*="priceValue"]').get_text()
+
                     scraper.value = float(price.lstrip('$').replace(',', '_'))
 
                     scraper.save()
 
                 data.append(scraper.toDict())
 
-        except AttributeError:
-            return HttpResponseServerError(json.dumps({
-                "error": "[{}] not found".format(scraper.currency)}),
+        except TypeError:
+            return HttpResponseServerError(
+                json.dumps({"error": "[{}] not found".format(scraper.currency)}),
                 content_type='application/json')
         except requests.ConnectionError:
             return HttpResponseServerError(
